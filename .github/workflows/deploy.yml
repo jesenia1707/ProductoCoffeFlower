@@ -24,8 +24,10 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
+          cache-dependency-path: coffeFlowerBack/**/*.gradle*
 
       - name: Build Coffee Flower
+        working-directory: coffeFlowerBack
         run: |
           chmod +x gradlew
           ./gradlew clean build -x test
@@ -38,9 +40,9 @@ jobs:
           host: ${{ vars.TARGET_HOST_IP }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build/deploy/coffeFlowerBack.jar"
+          source: "coffeFlowerBack/build/deploy/coffeFlowerBack.jar"
           target: "/home/ec2-user/coffeFlowerBack/"
-          strip_components: 2
+          strip_components: 3
 
   deploy:
     runs-on: ubuntu-latest
@@ -62,6 +64,14 @@ jobs:
             mkdir -p /home/ec2-user/coffeFlowerBack
             cd /home/ec2-user/coffeFlowerBack
 
+            echo "Verificando archivo JAR..."
+
+            if [ ! -f coffeFlowerBack.jar ]; then
+              echo "ERROR: No se encontró coffeFlowerBack.jar"
+              ls -la
+              exit 1
+            fi
+
             echo "Deteniendo aplicación anterior..."
 
             if [ -f coffeFlowerBack.pid ]; then
@@ -70,12 +80,20 @@ jobs:
               if kill -0 "$PID" 2>/dev/null; then
                 kill "$PID"
                 sleep 3
+
+                if kill -0 "$PID" 2>/dev/null; then
+                  kill -9 "$PID" || true
+                fi
+
+                echo "Aplicación anterior detenida."
+              else
+                echo "La aplicación anterior no estaba ejecutándose."
               fi
 
               rm -f coffeFlowerBack.pid
             fi
 
-            echo "Iniciando Coffee Flower..."
+            echo "Iniciando Coffee Flower en el puerto 8080..."
 
             nohup java -jar coffeFlowerBack.jar \
               --server.port=8080 \
@@ -83,16 +101,19 @@ jobs:
 
             echo $! > coffeFlowerBack.pid
 
-            sleep 5
+            sleep 10
 
-            if ! kill -0 "$(cat coffeFlowerBack.pid)" 2>/dev/null; then
-              echo "ERROR: la aplicación no inició."
+            PID=$(cat coffeFlowerBack.pid)
+
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "ERROR: Coffee Flower no inició correctamente."
               tail -n 50 coffeFlowerBack.log
+              rm -f coffeFlowerBack.pid
               exit 1
             fi
 
-            echo "Aplicación iniciada:"
-            ps -p "$(cat coffeFlowerBack.pid)" -f
+            echo "Proceso de Coffee Flower:"
+            ps -p "$PID" -f
 
             echo "Últimas líneas del log:"
             tail -n 20 coffeFlowerBack.log
